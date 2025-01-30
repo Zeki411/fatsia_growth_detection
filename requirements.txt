@@ -6,3 +6,6 @@ torch>=1.7.0
 torchvision>=0.8.1
 
 roboflow>=1.1.51
+
+ipykernel
+# mmengine
