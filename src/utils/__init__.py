@@ -16,7 +16,7 @@ LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable
 
 # Other Constants
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of multiprocessing threads
-
+DEFAULT_CFG_PATH = ""  # default config path
 LOGGING_NAME = ""
 MACOS, LINUX, WINDOWS = (platform.system() == x for x in ["Darwin", "Linux", "Windows"])  # environment booleans
 

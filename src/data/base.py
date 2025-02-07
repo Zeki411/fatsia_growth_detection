@@ -13,7 +13,7 @@ import numpy as np
 import psutil
 from torch.utils.data import Dataset
 
-from src.data.utils import IMG_FORMATS, VID_FORMATS, FORMATS_HELP_MSG, DEFAULT_CFG
+from src.data.utils import FORMATS_HELP_MSG, HELP_URL, IMG_FORMATS
 from src.utils import DEFAULT_CFG, LOCAL_RANK, LOGGER, NUM_THREADS, TQDM
 
 
