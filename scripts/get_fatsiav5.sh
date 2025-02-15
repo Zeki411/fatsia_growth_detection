@@ -4,6 +4,7 @@ mkdir -p "./data/fatsiav5"
 
 data_dir="./data/fatsiav5"
 url="https://app.roboflow.com/ds/qHXWvNjed6?key=GoTLzbFc8M"
+# url="https://app.roboflow.com/ds/XgZFS6sDbK?key=mzQSNcmgtz"
 f="fatsiav5.zip"
 
 echo " downloading $url to $data_dir/$f ..."
