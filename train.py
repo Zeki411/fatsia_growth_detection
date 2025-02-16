@@ -23,13 +23,59 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 
-from src.utils.general import (LOGGER, TQDM_BAR_FORMAT, colorstr, print_args )
+from src.utils.general import (LOGGER, TQDM_BAR_FORMAT, colorstr, print_args, check_file,
+                               get_latest_run, yaml_save )
+from src.utils.torch_utils import select_device
+from src.utils.callbacks import Callbacks
+
+# https://pytorch.org/docs/stable/elastic/run.html
+LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # processor-level rank
+RANK = int(os.getenv('RANK', -1)) # machine-level rank
+WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1)) # number of processor in total accross machines
 
 
-LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
-RANK = int(os.getenv('RANK', -1))
-WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
+def train(hyp, opt, device, callbacks=Callbacks):
+    save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze = \
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
+        opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
+    callbacks.run('on_pretrain_routine_start')
 
+    # Directories
+    w = save_dir / 'weights'  # weights dir
+    (w.parent if evolve else w).mkdir(parents=True, exist_ok=True)  # make dir
+    last, best = w / 'last.pt', w / 'best.pt'
+    last_striped, best_striped = w / 'last_striped.pt', w / 'best_striped.pt'
+    
+    # Hyperparameters
+    if isinstance(hyp, str):
+        with open(hyp, errors='ignore') as f:
+            hyp = yaml.safe_load(f)  # load hyps dict
+    LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
+    hyp['anchor_t'] = 5.0
+    opt.hyp = hyp.copy()  # for saving hyps to checkpoints
+
+    # Save run settings
+    if not evolve:
+        yaml_save(save_dir / 'hyp.yaml', hyp)
+        yaml_save(save_dir / 'opt.yaml', vars(opt))
+
+    # Loggers
+    #TODO
+    
+    # Resume Training
+    if RANK in {-1, 0} and resume: # If resuming runs from remote artifact
+        weights, epochs, hyp, batch_size = opt.weights, opt.epochs, opt.hyp, opt.batch_size
+
+    
+    # Config
+    
+    
+    # Models
+    
+    
+    
+    
+    
 
 
 def parse_opt(known=False):
@@ -75,10 +121,10 @@ def parse_opt(known=False):
     parser.add_argument('--close-mosaic', type=int, default=0, help='Experimental')
     
     # Logger arguments
-    parser.add_argument('--entity', default=None, help='Entity')
-    parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='Upload data, "val" option')
-    parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval')
-    parser.add_argument('--artifact_alias', type=str, default='latest', help='Version of dataset artifact to use')
+    # parser.add_argument('--entity', default=None, help='Entity')
+    # parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='Upload data, "val" option')
+    # parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval')
+    # parser.add_argument('--artifact_alias', type=str, default='latest', help='Version of dataset artifact to use')
 
     return parser.parse_known_args()[0] if known else parser.parse_args()
 
@@ -87,6 +133,40 @@ def main(opt, callbacks=None):
     # Checks
     if RANK in {-1, 0}:
         print_args(vars(opt))
+        
+    # Resume (from specified or most recent last.pt)
+    # TODO
+    # if opt.resume and not opt.evolve:
+    #     last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
+    #     opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
+    #     if opt_yaml.is_file():
+    #         with open(opt_yaml, errors='ignore') as f:
+    #             d = yaml.safe_load(f)
+    #     else:
+    #         d = torch.load(last, map_location='cpu')['opt']
+    #     opt = argparse.Namespace(**d)  # replace
+    #     opt.cfg, opt.weights, opt.resume = '', str(last), True  # reinstate
+
+    # DDP mode
+    device = select_device(opt.device, batch_size=opt.batch_size)
+    if LOCAL_RANK != -1:
+        msg = 'is not compatible with YOLO Multi-GPU DDP training'
+        assert not opt.image_weights, f'--image-weights {msg}'
+        assert not opt.evolve, f'--evolve {msg}'
+        assert opt.batch_size != -1, f'AutoBatch with --batch-size -1 {msg}, please pass a valid --batch-size'
+        assert opt.batch_size % WORLD_SIZE == 0, f'--batch-size {opt.batch_size} must be multiple of WORLD_SIZE'
+        assert torch.cuda.device_count() > LOCAL_RANK, 'insufficient CUDA devices for DDP command'
+        torch.cuda.set_device(LOCAL_RANK)
+        device = torch.device('cuda', LOCAL_RANK)
+        dist.init_process_group(backend="nccl" if dist.is_nccl_available() else "gloo")
+            
+    # Train
+    train(opt.hyp, opt, device, callbacks)
+    
+    
+    # Evolve ? TODO
+        
+        
 
 
 def run(**kwargs):

@@ -76,6 +76,27 @@ if platform.system() == 'Windows':
         setattr(LOGGER, fn.__name__, lambda x: fn(emojis(x)))  # emoji safe logging
         
 
+def file_date(path=__file__):
+    # Return human-readable file modification date, i.e. '2021-3-26'
+    t = datetime.fromtimestamp(Path(path).stat().st_mtime)
+    return f'{t.year}-{t.month}-{t.day}'
+
+
+def git_describe(path=ROOT):  # path must be a directory
+    # Return human-readable git description, i.e. v5.0-5-g3e25f1e https://git-scm.com/docs/git-describe
+    try:
+        assert (Path(path) / '.git').is_dir()
+        return check_output(f'git -C {path} describe --tags --long --always', shell=True).decode()[:-1]
+    except Exception:
+        return ''
+        
+        
+def get_latest_run(search_dir='.'):
+    # Return path to most recent 'last.pt' in /runs (i.e. to --resume from)
+    last_list = glob.glob(f'{search_dir}/**/last*.pt', recursive=True)
+    return max(last_list, key=os.path.getctime) if last_list else ''
+        
+
 def print_args(args: Optional[dict] = None, show_file=True, show_func=False):
     # Print function arguments (optional args dict)
     x = inspect.currentframe().f_back  # previous frame
@@ -101,6 +122,62 @@ def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=Fals
     if verbose and not result:
         LOGGER.warning(s)
     return result
+
+
+def check_suffix(file='yolo.pt', suffix=('.pt',), msg=''):
+    # Check file(s) for acceptable suffix
+    if file and suffix:
+        if isinstance(suffix, str):
+            suffix = [suffix]
+        for f in file if isinstance(file, (list, tuple)) else [file]:
+            s = Path(f).suffix.lower()  # file suffix
+            if len(s):
+                assert s in suffix, f"{msg}{f} acceptable suffix is {suffix}"
+
+
+def check_yaml(file, suffix=('.yaml', '.yml')):
+    # Search/download YAML file (if necessary) and return path, checking suffix
+    return check_file(file, suffix)
+  
+
+def check_file(file, suffix=''):
+    # Search/download file (if necessary) and return path
+    check_suffix(file, suffix)  # optional
+    file = str(file)  # convert to str()
+    if os.path.isfile(file) or not file:  # exists
+        return file
+    elif file.startswith(('http:/', 'https:/')):  # download
+        url = file  # warning: Pathlib turns :// -> :/
+        file = Path(urllib.parse.unquote(file).split('?')[0]).name  # '%2F' to '/', split https://url.com/file.txt?auth
+        if os.path.isfile(file):
+            LOGGER.info(f'Found {url} locally at {file}')  # file already exists
+        else:
+            LOGGER.info(f'Downloading {url} to {file}...')
+            torch.hub.download_url_to_file(url, file)
+            assert Path(file).exists() and Path(file).stat().st_size > 0, f'File download failed: {url}'  # check
+        return file
+    elif file.startswith('clearml://'):  # ClearML Dataset ID
+        assert 'clearml' in sys.modules, "ClearML is not installed, so cannot use ClearML dataset. Try running 'pip install clearml'."
+        return file
+    else:  # search
+        files = []
+        for d in 'data', 'models', 'utils':  # search directories
+            files.extend(glob.glob(str(ROOT / d / '**' / file), recursive=True))  # find file
+        assert len(files), f'File not found: {file}'  # assert file was found
+        assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
+        return files[0]  # return file
+    
+
+def yaml_load(file='data.yaml'):
+    # Single-line safe yaml loading
+    with open(file, errors='ignore') as f:
+        return yaml.safe_load(f)
+
+
+def yaml_save(file='data.yaml', data={}):
+    # Single-line safe yaml saving
+    with open(file, 'w') as f:
+        yaml.safe_dump({k: str(v) if isinstance(v, Path) else v for k, v in data.items()}, f, sort_keys=False)
 
 
 def colorstr(*input):
