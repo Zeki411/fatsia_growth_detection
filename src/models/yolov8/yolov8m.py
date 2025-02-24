@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from ultralytics.nn.modules import Detect
+
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     """Pad to 'same' shape outputs."""
@@ -95,50 +97,124 @@ class SPPF(nn.Module):
         y.extend(self.m(y[-1]) for _ in range(3))
         return self.cv2(torch.cat(y, 1))
     
-
-class BackBone(nn.Module):
     
-    def __init__(self):
+class Concat(nn.Module):
+    """Concatenate a list of tensors along dimension."""
+
+    def __init__(self, dimension=1):
+        """Concatenates a list of tensors along a specified dimension."""
         super().__init__()
-        
-        self.model = nn.Sequential(*[
-            Conv(c1=3,c2=48,k=3,s=2),
-            Conv(c1=48,c2=96,k=3,s=2),   
-            
-            C2f(c1=96,c2=96,n=2, shortcut=True),
-            
-            Conv(c1=96,c2=192,k=3,s=2),   
+        self.d = dimension
 
-            C2f(c1=192,c2=192,n=4,shortcut=True),
-            
-            Conv(c1=192,c2=384,k=3,s=2),  
-            
-            C2f(c1=384,c2=384,n=4,shortcut=True),
-
-            Conv(c1=384,c2=576,k=3,s=2),  
-
-            C2f(c1=576,c2=576,n=2,shortcut=True),
-
-            SPPF(c1=576,c2=576,k=5)
-        ])
-
-        
     def forward(self, x):
-        
-        y = self.model(x)
-        
-        return y
-        
-
-
-class Detect(nn.Module):
+        """Forward pass for the YOLOv8 mask Proto module."""
+        return torch.cat(x, self.d)
+    
+    
+class BackBone(nn.Module):
+    """Feature extraction backbone for YOLO model."""
     
     def __init__(self):
         super().__init__()
+
+        self.conv1 = Conv(c1=3, c2=48, k=3, s=2)
+        self.conv2 = Conv(c1=48, c2=96, k=3, s=2)
+
+        self.c2f1 = C2f(c1=96, c2=96, n=2, shortcut=True)
+
+        self.conv3 = Conv(c1=96, c2=192, k=3, s=2)
+
+        self.c2f2 = C2f(c1=192, c2=192, n=4, shortcut=True)
+
+        self.conv4 = Conv(c1=192, c2=384, k=3, s=2)  # P4 output point
+
+        self.c2f3 = C2f(c1=384, c2=384, n=4, shortcut=True)
+
+        self.conv5 = Conv(c1=384, c2=576, k=3, s=2)
+
+        self.c2f4 = C2f(c1=576, c2=576, n=2, shortcut=True)
+
+        self.sppf = SPPF(c1=576, c2=576, k=5)
+
+    def forward(self, x):
+        """Forward pass through the backbone."""
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.c2f1(x)
+        p3 = self.conv3(x)
+        x = self.c2f2(p3)
+        p4 = self.conv4(x)  # Extract P4 feature map
+        x = self.c2f3(p4)
+        p5 = self.conv5(x)
+        x = self.c2f4(p5)
+        x = self.sppf(x)
+
+        return x, p3, p4, p5  # Return both final feature map and P3, P4, P5
         
-    def forward(x):
+
+class DetectHead(nn.Module):
+    
+    def __init__(self, nc: int = 80):
+        super().__init__()
         
-        return x
+        self.ups1 = nn.Upsample(size=None, scale_factor=2, mode="nearest")
+        self.cc1 = Concat(dimension=1)
+        self.c2f1 = C2f(c1=960, c2=384, n=2, shortcut=False)
+        
+        self.ups2 = nn.Upsample(size=None, scale_factor=2, mode="nearest")
+        self.cc2 = Concat(dimension=1)
+        self.c2f2 = C2f(c1=384, c2=192, n=2, shortcut=False)
+        
+        self.conv1 = Conv(c1=192, c2=192, k=3, s=2)
+        self.cc3 = Concat(dimension=1)
+        self.c2f3 = C2f(c1=576, c2=384, n=2, shortcut=False)
+        
+        self.conv2 = Conv(c1=384, c2=384, k=3, s=2)
+        self.cc4 = Concat(dimension=1)
+        self.c2f4 = C2f(c1=384, c2=768, n=2, shortcut=False)
+        
+        # self.det = Detect(nc=nc)
+        
+        
+    def forward(self, x, p3, p4, p5):
+        
+        h1 = self.ups1(x)
+        h1 = self.cc1([h1, p4])
+        h1 = self.c2f1(h1)
+        
+        h2 = self.ups2(h1)
+        h2 = self.cc2([h2, p3])
+        h2 = self.c2f2(h2)
+        
+        h3 = self.conv1(h2)
+        h3 = self.cc3([h3, h1])
+        h3 = self.c2f3(h3)
+        
+        h4 = self.conv2(h3)
+        h4 = self.cc4([h4, p5])
+        h4 = self.c2f4(h4)
+        
+        
+        # y = self.det([h2, h3, h4])
+        
+        # return y
+        
+        return h2, h3, h4
+    
+class Yolom(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.backbone = BackBone()
+        self.head = DetectHead()
+
+    def forward(self, x):
+        """Forward pass through the full model."""
+        backbone_out, p3, p4, p5 = self.backbone(x)  # Extract features and P4
+        # final_out = self.head(backbone_out, p3, p4, p5)
+        h1, h2, h3 = self.head(backbone_out, p3, p4, p5)
+        # return final_out
+        return h1, h2, h3
 
 
 if __name__ == "__main__":
@@ -146,10 +222,11 @@ if __name__ == "__main__":
     
     input = torch.randn(1, 3, 640, 640)
     
-    model = BackBone()
-    print(model)
+    # model = BackBone()
+    model = Yolom()
+    # print(model)
     
-    print(input.shape)
+    # print(input.shape)
     
     output = model(input)
     print(output.shape)
