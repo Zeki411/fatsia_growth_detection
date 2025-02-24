@@ -163,7 +163,7 @@ class DetectHead(nn.Module):
         
         self.ups2 = nn.Upsample(size=None, scale_factor=2, mode="nearest")
         self.cc2 = Concat(dimension=1)
-        self.c2f2 = C2f(c1=384, c2=192, n=2, shortcut=False)
+        self.c2f2 = C2f(c1=576, c2=192, n=2, shortcut=False)
         
         self.conv1 = Conv(c1=192, c2=192, k=3, s=2)
         self.cc3 = Concat(dimension=1)
@@ -171,9 +171,9 @@ class DetectHead(nn.Module):
         
         self.conv2 = Conv(c1=384, c2=384, k=3, s=2)
         self.cc4 = Concat(dimension=1)
-        self.c2f4 = C2f(c1=384, c2=768, n=2, shortcut=False)
+        self.c2f4 = C2f(c1=960, c2=576, n=2, shortcut=False)
         
-        # self.det = Detect(nc=nc)
+        self.det = Detect(nc=nc, ch=(192,384,576))
         
         
     def forward(self, x, p3, p4, p5):
@@ -195,11 +195,11 @@ class DetectHead(nn.Module):
         h4 = self.c2f4(h4)
         
         
-        # y = self.det([h2, h3, h4])
+        y = self.det([h2, h3, h4])
         
-        # return y
+        return y
         
-        return h2, h3, h4
+        # return h2, h3, h4
     
 class Yolom(nn.Module):
     def __init__(self):
@@ -211,10 +211,10 @@ class Yolom(nn.Module):
     def forward(self, x):
         """Forward pass through the full model."""
         backbone_out, p3, p4, p5 = self.backbone(x)  # Extract features and P4
-        # final_out = self.head(backbone_out, p3, p4, p5)
-        h1, h2, h3 = self.head(backbone_out, p3, p4, p5)
-        # return final_out
-        return h1, h2, h3
+        final_out = self.head(backbone_out, p3, p4, p5)
+        # h1, h2, h3 = self.head(backbone_out, p3, p4, p5)
+        return final_out
+        # return self.head(backbone_out, p3, p4, p5)
 
 
 if __name__ == "__main__":
@@ -224,10 +224,18 @@ if __name__ == "__main__":
     
     # model = BackBone()
     model = Yolom()
-    # print(model)
+    print(model)
     
     # print(input.shape)
     
     output = model(input)
-    print(output.shape)
+    print(len(output))
+    print(output[0].shape)
+    print(output[1].shape)
+    print(output[2].shape)
+    
+    # o1,o2,o3 = model(input)
+    # print(o1.shape)
+    # print(o2.shape)
+    # print(o3.shape)
         
